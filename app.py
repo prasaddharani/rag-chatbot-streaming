@@ -11,6 +11,8 @@ import time
 import requests
 from flask_cors import CORS
 from io import BytesIO
+from flask import Response
+import json, time  # ensure time and json are imported
 
 app = Flask(__name__)
 
@@ -43,56 +45,21 @@ print(f"Execution time for vector load: {execution_time} seconds")
 def index():
     return render_template('index.html')
 
-@app.route('/proxy', methods=['GET'])
-def proxy():
-    url = request.args.get('url')
-    if not url:
-        return jsonify({'error': 'No URL provided'}), 400
-
-    headers = {}
-    if 'Range' in request.headers:
-        headers['Range'] = request.headers['Range']
-
-    response = requests.get(url, headers=headers, stream=True)
-    
-    if response.status_code not in [200, 206]:
-        return jsonify({'error': 'Failed to fetch the video'}), response.status_code
-
-    def generate():
-        for chunk in response.iter_content(chunk_size=8192):
-            yield chunk
-
-    rv = Response(generate(), status=response.status_code, headers=dict(response.headers))
-    rv.headers['Content-Type'] = 'video/mp4'
-    rv.headers['Accept-Ranges'] = 'bytes'
-    return rv
-
 @app.route('/ask', methods=['POST'])
 def ask():
     data = request.json
     question = data.get('question')
     print('question: ', question)
     answer, image_data, suggestions, videos_path = answer_question(question, vector_store, metadata_store, images, videos)
-
-    response = {
-        'answer': answer,
-        'images': image_data,
-        'suggestions': suggestions
-        }
-    # response = {
-    #     'answer': 'hello',
-    #     'images': '',
-    #     'suggestions': ['How are you?', 'How can i assist you today?']
-    #     }
-    # If composite in question without case sensitivity
-    if len(videos_path) > 0:
-        response['videos'] = [url_for('static', filename='videos/' + video_path) for video_path in videos_path]
-    # if 'test' in question.lower():
-    #     # response['links'] = ['https://www.google.com']
-    #     #response['videos'] = [url_for('static', filename='videos/test.mp4')]
-    #     # some sample video to play
-    #     response['videos'] = ['http://localhost:5000/proxy?url=https://www.youtube.com/watch?v=Nx4HDJ-TZn4']
-    return jsonify(response)
+    
+    def generate():
+        # Stream the answer in lines
+        for line in answer.splitlines():
+            yield f"data: {json.dumps({'answer_chunk': line})}\n\n"
+            time.sleep(0.1)  # simulate delay between chunks
+        # Then send final payload for extra data
+        yield f"data: {json.dumps({'final': True, 'images': image_data, 'suggestions': suggestions, 'videos': videos_path})}\n\n"
+    return Response(generate(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
     app.run(debug=True)

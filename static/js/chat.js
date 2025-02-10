@@ -112,28 +112,62 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Function to send message
+    // Function to simulate typing with faster speed and multiple characters at a time.
+    function simulateTyping(text, container) {
+        return new Promise(resolve => {
+            // Replace both actual newlines and literal "\n\n" sequences with <br>
+            const processedText = text.replace(/(\\n\\n|\n\n)/g, "<br>");
+            // Split processed text into tokens while keeping HTML tags intact.
+            const tokens = processedText.match(/(<[^>]+>|[^<]+)/g) || [];
+            function typeToken(i) {
+                if (i < tokens.length) {
+                    const token = tokens[i];
+                    if (token.startsWith('<') && token.endsWith('>')) {
+                        // Append HTML tags immediately.
+                        container.innerHTML += token;
+                        messages.scrollTop = messages.scrollHeight;
+                        typeToken(i + 1);
+                    } else {
+                        let j = 0;
+                        function typeChar() {
+                            if (j < token.length) {
+                                // Append 3 characters at a time for a faster effect.
+                                const slice = token.slice(j, j + 3);
+                                container.innerHTML += slice;
+                                j += 3;
+                                messages.scrollTop = messages.scrollHeight;
+                                setTimeout(typeChar, 10); // Adjust delay (10ms) as needed.
+                            } else {
+                                typeToken(i + 1);
+                            }
+                        }
+                        typeChar();
+                    }
+                } else {
+                    resolve();
+                }
+            }
+            typeToken(0);
+        });
+    }
+
+    // Example usage inside sendMessage():
     function sendMessage() {
         var userInputValue = userInput.value.trim();
+        if (userInputValue === '') return;
+
         isGeneratingResponse = true;
         var messages = document.getElementById('messages');
-        messages.addEventListener('click', function(event) {
-            if (event.target.tagName === 'IMG') {
-                openImageModal(event.target.src);
-            }
-        });
-        var suggestionsContainer = document.getElementById('suggestionsContainer');
-
-        if (userInputValue === '') return;
 
         // Disable send button while generating response
         actionButton.disabled = true;
 
-        // Add user message with a label
-        messages.innerHTML += `<div class="user"><b>User:</b> ${userInputValue}</div>`;
+        // Add user's message
+        messages.innerHTML += `<div class="user" style="font-size: 17px;"><b>User:</b> ${userInputValue}</div>`;
         userInput.value = '';
 
         // Clear suggestions container
+        var suggestionsContainer = document.getElementById('suggestionsContainer');
         suggestionsContainer.innerHTML = '';
 
         // Add loading placeholder
@@ -141,9 +175,12 @@ document.addEventListener('DOMContentLoaded', function() {
         loadingPlaceholder.className = 'loading-placeholder';
         loadingPlaceholder.innerText = 'Bot is typing...';
         messages.appendChild(loadingPlaceholder);
-        messages.scrollTop = messages.scrollHeight; // Scroll to bottom
+        messages.scrollTop = messages.scrollHeight;
 
-        // Send user input to the server
+        // Variables to manage bot container and typing queue
+        var botMessageContainer;
+        var typeQueue = Promise.resolve();
+        
         fetch('ask', {
             method: 'POST',
             headers: {
@@ -151,202 +188,177 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             body: JSON.stringify({ question: userInputValue })
         })
-        .then(response => response.json())
-        .then(data => {
-            // Remove loading placeholder
-            messages.removeChild(loadingPlaceholder);
-            const text = data.answer.replace(/(?:\r\n|\r|\n)/g, '<br>');
-
-        // Create bot message container
-        // let botMessageHTML = `<div class="bot"><b>PR Bot:</b> ${text}`;
-        let botMessageHTML = `
-            <div class="bot">
-                <b>PR Bot:</b> ${text}
-        `;
-        console.log(data)
-        // Add links if they exist
-        if (data.links && data.links.length > 0) {
-            botMessageHTML += `
-                <div id="navigationContainer">
-                    ${data.links.map(link => `
-                        <a href="${link}" target="_blank" class="navigation-link">
-                            <i class="fas fa-arrow-up-right-from-square"></i>
-                            <span>Click here</span>
-                        </a>
-                    `).join('')}
-                </div>
-            `;
-        }
-        botMessageHTML += `
-                <div class="action-buttons">
-                    <button class="read-aloud-btn"><i class="fas fa-volume-up"></i></button>
-                    <button class="copy-btn"><i class="fas fa-copy"></i></button>
-                    <button class="like-btn"><i class="fas fa-thumbs-up"></i></button>
-                    <button class="dislike-btn"><i class="fas fa-thumbs-down"></i></button>
-                </div>
-        `
-
-        // Close the bot message container
-        botMessageHTML += '</div>';
-
-        // Add the complete message to chat
-        messages.innerHTML += botMessageHTML;
-
-        // Get the latest bot message container
-        const latestBotMessage = messages.querySelector('.bot:last-child');
-        if (latestBotMessage) {
-            // Get the action buttons
-            const readAloudBtn = latestBotMessage.querySelector('.read-aloud-btn');
-            const copyBtn = latestBotMessage.querySelector('.copy-btn');
-            const likeBtn = latestBotMessage.querySelector('.like-btn');
-            const dislikeBtn = latestBotMessage.querySelector('.dislike-btn');
-        
-
-        // Read Aloud functionality
-        if (readAloudBtn) {
-            let isSpeaking = false;
-            readAloudBtn.addEventListener('click', () => {
-                if (isSpeaking) {
-                    speechSynthesis.cancel();
-                    isSpeaking = false;
-                } else {
-                    const speech = new SpeechSynthesisUtterance(text);
-                    speech.lang = 'en-US';
-                    speech.volume = 1;
-                    speech.rate = 1;
-                    speech.pitch = 1;
-                    speechSynthesis.speak(speech);
-                    isSpeaking = true;
-                    speech.onend = () => {
-                        isSpeaking = false;
-                    };
-                }
-            });
-        }
-
-        // Copy functionality
-        if (copyBtn) {
-            copyBtn.addEventListener('click', () => {
-                try {
-                    // Debug logs
-                    console.log('Copy button clicked');
-                    
-                    // Get the bot message content
-                    const messageContainer = copyBtn.closest('.bot');
-                    console.log('Message container:', messageContainer);
-                    
-                    if (!messageContainer) {
-                        throw new Error('Message container not found');
+        .then(response => {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        actionButton.disabled = false;
+                        isGeneratingResponse = false;
+                        return;
                     }
-                    
-                    // Try both selectors
-                    let messageText = text;
-                    
-                    console.log('Message text element:', messageText);
-                    
-                    if (messageText) {
-                        const textToCopy = messageText.trim();
-                        console.log('Text to copy:', textToCopy);
-                        
-                        navigator.clipboard.writeText(textToCopy)
-                            .then(() => {
-                                const originalIcon = copyBtn.innerHTML;
-                                copyBtn.innerHTML = '<i class="fas fa-check"></i>';
-                                console.log('Text copied successfully');
+                    const chunk = decoder.decode(value, { stream: true });
+                    chunk.split("\n\n").forEach(part => {
+                        if (part.startsWith("data:")) {
+                            try {
+                                const data = JSON.parse(part.replace("data:", ""));
+                                if (data.answer_chunk) {
+                                    // Remove loading placeholder on first chunk
+                                    if (loadingPlaceholder.parentNode) {
+                                        loadingPlaceholder.parentNode.removeChild(loadingPlaceholder);
+                                    }
+                                    // Create bot container with label on first chunk if not present
+                                    if (!botMessageContainer) {
+                                        botMessageContainer = document.createElement('div');
+                                        botMessageContainer.className = 'bot';
+                                        botMessageContainer.style.fontSize = '17px';
+                                        botMessageContainer.innerHTML = `<b>PR Bot:</b> `;
+                                        messages.appendChild(botMessageContainer);
+                                    }
+                                    // Chain the typing animation for a natural sequential effect.
+                                    typeQueue = typeQueue.then(() =>
+                                        simulateTyping(data.answer_chunk + "<br>", botMessageContainer)
+                                    );
+                                }
+                                if (data.final) {
+                                    // Chain a promise to add feedback icons, then images, videos, and suggestions
+                                    typeQueue = typeQueue.then(() => {
+                                        // Create a container for the feedback icons and append it to the bot container
+                                        const actionButtons = document.createElement('div');
+                                        actionButtons.className = 'action-buttons';
+                                        actionButtons.innerHTML = `
+                                            <button class="read-aloud-btn"><i class="fas fa-volume-up"></i></button>
+                                            <button class="copy-btn"><i class="fas fa-copy"></i></button>
+                                            <button class="like-btn"><i class="fas fa-thumbs-up"></i></button>
+                                            <button class="dislike-btn"><i class="fas fa-thumbs-down"></i></button>
+                                        `;
+                                        botMessageContainer.appendChild(actionButtons);
                                 
-                                setTimeout(() => {
-                                    copyBtn.innerHTML = originalIcon;
-                                }, 2000);
-                            })
-                            .catch(err => {
-                                console.error('Clipboard API error:', err);
-                                alert('Failed to copy text');
-                            });
-                    } else {
-                        throw new Error('No text content found to copy');
-                    }
-                } catch (error) {
-                    console.error('Copy failed:', error);
-                    alert('Unable to copy text');
-                }
-            });
-        }
-
-        // Like functionality
-        if (likeBtn) {
-            likeBtn.addEventListener('click', () => {
-                // Remove both classes first
-                likeBtn.classList.remove('liked');
-                dislikeBtn.classList.remove('disliked');
-                // Add liked class
-                likeBtn.classList.add('liked');
-            });
-        }
-
-        // Dislike functionality
-        if (dislikeBtn) {
-            dislikeBtn.addEventListener('click', () => {
-                // Remove both classes first
-                likeBtn.classList.remove('liked');
-                dislikeBtn.classList.remove('disliked');
-                // Add disliked class
-                dislikeBtn.classList.add('disliked');
-            });
-        }
-    }
-
-    // Add images if present
-    if (data.images && data.images.length > 0) {
-        data.images.forEach((imageBase64, index) => {
-            var img = document.createElement('img');
-            img.src = 'data:image/png;base64,' + imageBase64;
-            img.className = 'chat-image';
-            img.onclick = function() {
-                openImageModal(img.src);
-            };
-            messages.appendChild(img);
-        });
-    }
-    console.log(data.videos);
-
-    if (data.videos && data.videos.length > 0) {
-        data.videos.forEach((videoUrl, index) => {
-            console.log(videoUrl);
-            var video = document.createElement('video');
-            video.src = videoUrl;
-            video.controls = true;
-            video.className = 'chat-video';
-            messages.appendChild(video);
-        });
-    }
-            
-
-
-    // Display follow-up questions
-    displaySuggestions(data.suggestions || []);
-
-    messages.scrollTop = messages.scrollHeight; // Scroll to bottom
-
-    actionButton.innerHTML = '<i class="fas fa-microphone"></i>'; // Revert to microphone icon
-    actionButton.onclick = startRecording;
-    })
-    .catch(error => {
+                                        // Extract the bot's text (excluding the label)
+                                        const botText = botMessageContainer.innerText.replace('PR Bot:', '').trim();
+                                
+                                        // Get the action buttons from the newly created container
+                                        const readAloudBtn = actionButtons.querySelector('.read-aloud-btn');
+                                        const copyBtn = actionButtons.querySelector('.copy-btn');
+                                        const likeBtn = actionButtons.querySelector('.like-btn');
+                                        const dislikeBtn = actionButtons.querySelector('.dislike-btn');
+                                
+                                        // Read Aloud functionality
+                                        if (readAloudBtn) {
+                                            let isSpeaking = false;
+                                            readAloudBtn.addEventListener('click', () => {
+                                                if (isSpeaking) {
+                                                    speechSynthesis.cancel();
+                                                    isSpeaking = false;
+                                                } else {
+                                                    const speech = new SpeechSynthesisUtterance(botText);
+                                                    speech.lang = 'en-US';
+                                                    speech.volume = 1;
+                                                    speech.rate = 1;
+                                                    speech.pitch = 1;
+                                                    speechSynthesis.speak(speech);
+                                                    isSpeaking = true;
+                                                    speech.onend = () => {
+                                                        isSpeaking = false;
+                                                    };
+                                                }
+                                            });
+                                        }
+                                
+                                        // Copy functionality
+                                        if (copyBtn) {
+                                            copyBtn.addEventListener('click', () => {
+                                                navigator.clipboard.writeText(botText)
+                                                    .then(() => {
+                                                        const originalIcon = copyBtn.innerHTML;
+                                                        copyBtn.innerHTML = '<i class="fas fa-check"></i>';
+                                                        setTimeout(() => {
+                                                            copyBtn.innerHTML = originalIcon;
+                                                        }, 2000);
+                                                    })
+                                                    .catch(err => {
+                                                        console.error('Clipboard API error:', err);
+                                                        alert('Failed to copy text');
+                                                    });
+                                            });
+                                        }
+                                
+                                        // Like functionality
+                                        if (likeBtn) {
+                                            likeBtn.addEventListener('click', () => {
+                                                likeBtn.classList.toggle('liked');
+                                                if (dislikeBtn.classList.contains('disliked')) {
+                                                    dislikeBtn.classList.remove('disliked');
+                                                }
+                                            });
+                                        }
+                                
+                                        // Dislike functionality
+                                        if (dislikeBtn) {
+                                            dislikeBtn.addEventListener('click', () => {
+                                                dislikeBtn.classList.toggle('disliked');
+                                                if (likeBtn.classList.contains('liked')) {
+                                                    likeBtn.classList.remove('liked');
+                                                }
+                                            });
+                                        }
+                                
+                                        // Now append images (after the feedback icons)
+                                        if (data.images && data.images.length > 0) {
+                                            data.images.forEach(imageBase64 => {
+                                                const img = document.createElement('img');
+                                                img.src = 'data:image/png;base64,' + imageBase64;
+                                                img.className = 'chat-image';
+                                                img.onclick = function() {
+                                                    openImageModal(img.src);
+                                                };
+                                                messages.appendChild(img);
+                                            });
+                                        }
+                                
+                                        // Append videos after images
+                                        if (data.videos && data.videos.length > 0) {
+                                            data.videos.forEach(videoUrl => {
+                                                const video = document.createElement('video');
+                                                video.src = videoUrl;
+                                                video.controls = true;
+                                                video.className = 'chat-video';
+                                                messages.appendChild(video);
+                                            });
+                                        }
+                                
+                                        // Finally, display suggestions (if any)
+                                        displaySuggestions(data.suggestions || []);
+                                    });
+                                }
+                            } catch (e) {
+                                console.error("Error parsing streamed data", e);
+                            }
+                        }
+                    });
+                    read();
+                });
+            }
+            read();
+        })
+        .catch(error => {
             console.error('Error:', error);
-            messages.removeChild(loadingPlaceholder);
+            if (loadingPlaceholder.parentNode) {
+                loadingPlaceholder.parentNode.removeChild(loadingPlaceholder);
+            }
             messages.innerHTML += `<div class="bot"><b>PR Bot:</b> Sorry, there was an error processing your request.</div>`;
-            messages.scrollTop = messages.scrollHeight; // Scroll to bottom
-            actionButton.innerHTML = '<i class="fas fa-microphone"></i>'; // Revert to microphone icon
-            actionButton.onclick = startRecording;
+            messages.scrollTop = messages.scrollHeight;
+            actionButton.disabled = false;
         })
         .finally(() => {
             isGeneratingResponse = false;
-            userInput.disabled = false; // Re-enable input
+            userInput.disabled = false;
             actionButton.disabled = false;
-            userInput.focus(); // Return focus to input
-            userInput.placeholder = 'What else can I help you with?'; // Update placeholder after first question
+            userInput.focus();
+            userInput.placeholder = 'What else can I help you with?';
         });
     }
-
 
     // Resizable functionality
     var resizeHandle = document.getElementById('resize-handle');

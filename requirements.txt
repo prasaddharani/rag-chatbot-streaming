@@ -1,0 +1,9 @@
+flask
+requests
+python-dotenv
+pillow
+PyMuPDF
+faiss-cpu
+pip_system_certs
+certifi
+python-certifi-win32

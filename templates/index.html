@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aspire PR Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <div id="chatbot">
+        <div id="chatbox">
+            <!-- Inside the #chatbox-header div -->
+            <div id="chatbox-header">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" id="logo">
+                <span id="headerTitle">Aspire PR Assistant</span>
+                <!-- Minimize/Maximize button -->
+                <button id="toggleSize" title="Maximize Chatbox">
+                    <i class="far fa-window-maximize"></i>
+                </button>
+                <button id="closeChat" title="Close Chatbox">&#10006;</button>
+            </div>
+            <div id="messages"></div>
+            <!-- Add this above the inputContainer in your HTML -->
+            <div id="suggestionsContainer"></div>
+
+            <div id="inputContainer">
+                <input type="text" id="userInput" placeholder="How can I assist you today?">
+                <button id="actionButton" aria-label="Voice input" onclick="handleAction()">
+                    <i class="fas fa-microphone"></i> <!-- Default to microphone icon -->
+                </button>
+            </div>
+            <div id="resize-handle"></div>
+        </div>
+        <button id="toggleChat">
+            <img src="{{ url_for('static', filename='images/designer.png') }}" alt="Chatbot" id="chatbot-icon">
+        </button>
+    </div>
+    <div id="imageModal" class="image-modal">
+        <span class="image-modal-close">&times;</span>
+        <img class="image-modal-content" id="modalImage">
+    </div>
+
+    <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+</body>
+</html>
